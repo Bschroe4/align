@@ -3,7 +3,7 @@ Alignment of xyz coordinates according to Eckart conditions.
 
 Compile the code with `ifort` using the following commandline:
 ```
-ifot -o align.x align.F90 -mkl
+ifort -o align.x align.F90 -mkl
 ```
 
 The program requires 3 arguments (file names) that are passed through the command line call:
