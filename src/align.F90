@@ -4,15 +4,19 @@ PROGRAM align
 
   double precision, parameter :: factr=0.529177240859d0
   double precision, parameter :: factm=1822.888484
+  character(*),     parameter :: cvers="XVERSION"
+
 
   logical :: lexist
 
   integer :: nat,iat
   integer :: ixyz
   integer :: irep
+  integer :: ncmd,icmd,ifil
+  integer, allocatable, dimension(:)   :: mask
 
   character(len=100) :: cbuf
-  character(len=32)  :: cfile
+  character(len=32)  :: ccmd,clist
   character(len=3)   :: catlab,catom
   character(len=3), allocatable, dimension(:)   :: ztag
 
@@ -34,62 +38,80 @@ PROGRAM align
                                                           shape(ireptab_abc2xyz))
 !
   !1) read first argument i.e. xyzref unto which shall be aligned
-  call get_command_argument(1,cfile)
-  inquire(file=cfile,exist=lexist)
-  if(.not.lexist) call file_error(1,cfile)
-  open(unit=11,file=cfile,status='OLD')
-  read(11,'(I4)') nat
-  allocate(xyzref(3,nat))
-  allocate(atmass(nat))
-  allocate(ztag(nat))
-  read(11,*) cbuf
-  DO IAT=1,NAT
-    read(11,*) catom,(xyzref(ixyz,iat),ixyz=1,3)
-    catlab=StrUpCase(catom,len(catom),1)
-    atmass(iat)=convert_atlab_to_atmass(catlab)*factm
-    ztag(iat)=StrUpCase(catom,len(catom),0)
-    call dscal(3,1.d0/factr,xyzref(1,iat),1)
-  ENDDO
-  call transform_com(nat,atmass,xyzref)
-  ! transform to std. orientation
-! call transform_com(nat,atmass,xyzref)
-! call calc_inertia(nat,atmass,xyzref,I)
-! call DIAG(3,3,I,Ie,Xref)
-! call calc_be(ie,be)
-! call get_top(be,irep)
-! call rotaxis_phase(Xref)
-! call transform_stdorient(nat,xyzref,Xref,irep,ireptab_abc2xyz)
-  !2) read second argument i.e. xyz which shall be aligned
-  call get_command_argument(2,cfile)
-  inquire(file=cfile,exist=lexist)
-  if(.not.lexist) call file_error(1,cfile)
-  open(unit=12,file=cfile,status='OLD')
-  read(12,*) iat
-  if(iat.ne.nat) call nat_error(nat,iat)
-  allocate(xyz(3,nat))
-  read(12,*) cbuf
-  DO IAT=1,NAT
-    read(12,*) catom,(xyz(ixyz,iat),ixyz=1,3)
-    catlab=StrUpCase(catom,len(catom),1)
-    xmass=convert_atlab_to_atmass(catlab)*factm
-    if(xmass.ne.atmass(iat)) call mass_error(iat,xmass/factm,atmass(iat)/factm)
-    call dscal(3,1.d0/factr,xyz(1,iat),1)
-  ENDDO
-  !3) align xyz to xyzref
+  clist=""
+  ncmd=COMMAND_ARGUMENT_COUNT()
+  ! add KILL/CATCH if ncmd zero
+  icmd=0
+  ifil=0
+  do 
+    icmd=icmd+1
+    if(icmd.gt.ncmd) exit
+    call get_command_argument(icmd,ccmd)
+    select case (trim(ccmd))
+      case ("-h","--help")
+        ! print help
+      case ("-f","--fragment") ! align to a specific fragment 
+        icmd=icmd+1
+        call get_command_argument(icmd,clist)
+      case default ! file designations
+        ifil=ifil+1
+        select case (ifil)
+          case (1)
+!           call get_command_argument(1,cfile)
+            inquire(file=ccmd,exist=lexist)
+            if(.not.lexist) call file_error(1,ccmd)
+            open(unit=11,file=ccmd,status='OLD')
+            read(11,'(I4)') nat
+            allocate(xyzref(3,nat))
+            allocate(atmass(nat))
+            allocate(ztag(nat))
+            read(11,*) cbuf
+            DO IAT=1,NAT
+              read(11,*) catom,(xyzref(ixyz,iat),ixyz=1,3)
+              catlab=StrUpCase(catom,len(catom),1)
+              atmass(iat)=convert_atlab_to_atmass(catlab)*factm
+              ztag(iat)=StrUpCase(catom,len(catom),0)
+              call dscal(3,1.d0/factr,xyzref(1,iat),1)
+            ENDDO
+            close(unit=11)
+          case(2)
+            !2) read second argument i.e. xyz which shall be aligned
+            inquire(file=ccmd,exist=lexist)
+            if(.not.lexist) call file_error(1,ccmd)
+            open(unit=11,file=ccmd,status='OLD')
+            read(11,*) iat
+            if(iat.ne.nat) call nat_error(nat,iat)
+            allocate(xyz(3,nat))
+            read(11,*) cbuf
+            DO IAT=1,NAT
+              read(11,*) catom,(xyz(ixyz,iat),ixyz=1,3)
+              catlab=StrUpCase(catom,len(catom),1)
+              xmass=convert_atlab_to_atmass(catlab)*factm
+              if(xmass.ne.atmass(iat)) call mass_error(iat,xmass/factm,atmass(iat)/factm)
+              call dscal(3,1.d0/factr,xyz(1,iat),1)
+            ENDDO
+            close(unit=11)
+          case(3)
+            open(unit=11,file=ccmd,status='REPLACE')
+        end select
+    end select
+  end do
+!
+  allocate(mask(nat))
+  mask=1
+  call convert_list2mask(nat,clist,mask)
+  call transform_com(nat,mask,atmass,xyzref)
   allocate(tmp(3,nat))
   tmp=xyz
-  call transform_com(nat,atmass,tmp)
-  call quaternion(nat,tmp,xyzref,atmass,u)
+  call transform_com(nat,mask,atmass,tmp)
+  call quaternion(nat,tmp,xyzref,mask,atmass,u)
   do iat=1,nat
     call dgemm('N','N',3,1,3,1.d0,u,3,tmp(1,iat),3,0.d0,xyz(1,iat),3)
   enddo
-  !4) printout
-  call get_command_argument(3,cfile)
-  open(unit=13,file=cfile,status='REPLACE')
-  write(13,'(I4/)') nat
+  write(11,'(I4/)') nat
   DO IAT=1,NAT
     call dscal(3,factr,xyz(1,iat),1)
-    write(13,'(A3,3F15.10)') ztag(iat),(xyz(ixyz,iat),ixyz=1,3)
+    write(11,'(A3,3F15.10)') ztag(iat),(xyz(ixyz,iat),ixyz=1,3)
   ENDDO
 
 CONTAINS
@@ -173,11 +195,12 @@ FUNCTION convert_atlab_to_atmass ( catom ) RESULT ( xmass )
 
 END FUNCTION convert_atlab_to_atmass
 
-SUBROUTINE transform_com(nat,atmass,xyzeq)
+SUBROUTINE transform_com(nat,mask,atmass,xyzeq)
 
   IMPLICIT NONE
 
   integer,          intent(in)    :: nat
+  integer,          intent(in)    :: mask(nat)
   double precision, intent(in)    :: atmass(nat)
   double precision, intent(inout) :: xyzeq(3,nat)
 
@@ -188,11 +211,13 @@ SUBROUTINE transform_com(nat,atmass,xyzeq)
 
   totmas=0.d0
   DO iat=1,nat
+    if(mask(iat).ne.1) cycle
     totmas=totmas+atmass(iat)
   enddo
   com=0.d0
   do ixyz=1,3
     do iat=1,nat
+      if(mask(iat).ne.1) cycle
       com(ixyz)=com(ixyz)+atmass(iat)*xyzeq(ixyz,iat)
     enddo
     com(ixyz)=com(ixyz)/totmas
@@ -346,7 +371,7 @@ SUBROUTINE rotaxis_phase(xabc)
 
 END SUBROUTINE
 
-subroutine quaternion(nat,xyz,xyzref,atmass,u)
+subroutine quaternion(nat,xyz,xyzref,mask,atmass,u)
 
   implicit none
 
@@ -354,6 +379,7 @@ subroutine quaternion(nat,xyz,xyzref,atmass,u)
 
   double precision, intent(in)  :: xyz(3,nat)
   double precision, intent(in)  :: xyzref(3,nat)
+  integer,          intent(in)  :: mask(nat)
   double precision, intent(in)  :: atmass(nat)
 
   double precision, intent(inout) :: u(3,3)
@@ -372,6 +398,7 @@ subroutine quaternion(nat,xyz,xyzref,atmass,u)
   zm=0.d0
   zp=0.d0
   do iat=1,nat
+    if(mask(iat).ne.1) cycle
     xm(iat)=xyzref(1,iat)-xyz(1,iat)
     xp(iat)=xyzref(1,iat)+xyz(1,iat)
     ym(iat)=xyzref(2,iat)-xyz(2,iat)
@@ -416,40 +443,6 @@ subroutine quaternion(nat,xyz,xyzref,atmass,u)
 
 end subroutine
 
-subroutine file_error(ifile,cfile)
-
-  implicit none
-
-  integer,      intent(in) :: ifile
-  character(*), intent(in) :: cfile
-
-  write(0,'("!!!ERROR!!! File ",I1," not found! Filename: ",a)') ifile,trim(cfile)
-  stop
-
-end subroutine
-
-subroutine nat_error(iat,jat)
-
-  implicit none
-
-  integer, intent(in) :: iat,jat
-
-  write(0,'("!!!ERROR!!! Number of atoms not consistent!",2I4)') iat,jat
-  stop
-
-end subroutine
-
-subroutine mass_error(iat,ami,amj)
-
-  implicit none
-
-  integer,          intent(in) :: iat
-  double precision, intent(in) :: ami,amj
-  write(0,'("!!!ERROR!!! Inconsistent ordering! IAT: ",I4," Mi:",F10.0," Mj:",F10.0)') iat,ami,amj
-  stop
-
-end subroutine
-
 SUBROUTINE DIAG(M,N,A,D,X)
   
   implicit none
@@ -487,5 +480,123 @@ SUBROUTINE DIAG(M,N,A,D,X)
 
 END SUBROUTINE DIAG
 
+SUBROUTINE convert_list2mask(nat,list,mask)
+
+  implicit none
+
+  integer,      intent(in)  :: nat
+  character(*), intent(in)  :: list
+  integer,      intent(out) :: mask(nat)
+
+  character(len=5) :: cnum
+
+  integer :: nlen,ipos
+  integer :: ic,ir
+  integer :: iat,jat,kat
+  integer :: inum
+  integer :: istat
+
+  mask=0
+  nlen=len(trim(list))
+  write(0,*) list, nlen
+  cnum=""
+  do ipos=1,nlen
+    select case(list(ipos:ipos))
+      case("-")
+        ! collected lower bound
+        ir=1
+        read(cnum,'(I5)') iat
+        cnum=""
+      case(",")
+        if(ir.eq.1) then
+          !collected upper bound
+          ir=0
+          ic=0
+          read(cnum,'(I5)') jat
+          if(iat.gt.jat) call mask_error(1,iat,jat) 
+          do kat=iat,jat
+            mask(kat)=1
+          enddo
+          cnum=""
+        else
+          ! single index
+          ic=0
+          read(cnum,'(I5)') iat
+          mask(iat)=1
+          cnum=""
+        endif
+      case default 
+        read(list(ipos:ipos),'(I1)',iostat=istat) inum
+        if(istat.ne.0) call mask_error(2,ipos,0)
+        if(inum.eq.0) cycle 
+        ic=1
+        write(cnum,'(A,I1)') trim(adjustl(cnum)),inum
+    end select
+  enddo
+  if(ic.eq.1) then
+    if(ir.eq.1) then
+      read(cnum,'(I5)') jat
+      if(iat.gt.jat) call mask_error(1,iat,jat) 
+      do kat=iat,jat
+        mask(kat)=1
+      enddo
+    else
+      read(cnum,'(I5)') iat
+      mask(iat)=1
+      cnum=""
+    endif
+  endif
+
+END SUBROUTINE
+
+subroutine file_error(ifile,cfile)
+
+  implicit none
+
+  integer,      intent(in) :: ifile
+  character(*), intent(in) :: cfile
+
+  write(0,'("!!!ERROR!!! File ",I1," not found! Filename: ",a)') ifile,trim(cfile)
+  stop
+
+end subroutine
+
+subroutine nat_error(iat,jat)
+
+  implicit none
+
+  integer, intent(in) :: iat,jat
+
+  write(0,'("!!!ERROR!!! Number of atoms not consistent!",2I4)') iat,jat
+  stop
+
+end subroutine
+
+subroutine mass_error(iat,ami,amj)
+
+  implicit none
+
+  integer,          intent(in) :: iat
+  double precision, intent(in) :: ami,amj
+  write(0,'("!!!ERROR!!! Inconsistent ordering! IAT: ",I4," Mi:",F10.0," Mj:",F10.0)') iat,ami,amj
+  stop
+
+end subroutine
+
+subroutine mask_error(ierr,i,j)
+
+  implicit none
+
+  integer, intent(in) :: ierr
+  integer, intent(in) :: i,j
+  select case (ierr)
+    case (1)
+      write(0,'("!!!ERROR!!! Inconsistent index range! LOWER: ",I5," UPPER:",I5)') i,j
+    case (2)
+      write(0,'("!!!ERROR!!! Illegal character in framgment definition! POS:",I5)') i
+  end select
+  stop
+
+end subroutine
 
 END

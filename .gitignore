@@ -1,1 +1,3 @@
 # ignore test/play folder
+src/*
+!src/*.F90
